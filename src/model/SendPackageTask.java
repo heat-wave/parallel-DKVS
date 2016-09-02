@@ -1,6 +1,7 @@
 package model;
 
 import com.esotericsoftware.kryonet.Client;
+import model.request.ElectionVoteRequest;
 
 import java.util.concurrent.Callable;
 
@@ -13,10 +14,16 @@ public class SendPackageTask implements Callable<Response> {
 
     @Override
     public Response call() throws Exception {
+        try {
+            client.sendTCP(request);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
         return null;
     }
 
     public SendPackageTask(Client client, Request request) {
-        client.sendTCP(request);
+        this.client = client;
+        this.request = request;
     }
 }

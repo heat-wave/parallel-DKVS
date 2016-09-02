@@ -70,6 +70,7 @@ public class StateMachine {
     }
 
     boolean checkEntryValidity(int index, int term) {
-        return entries.get(index).getTerm() == term;
+        Entry toCheck = entries != null ? entries.get(index) : null;
+        return toCheck != null && toCheck.getTerm() == term;
     }
 }

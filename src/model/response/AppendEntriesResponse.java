@@ -33,4 +33,12 @@ public class AppendEntriesResponse extends Response {
     public void setSuccess(boolean success) {
         this.success = success;
     }
+
+    @Override
+    public String toString() {
+        return "AppendEntriesResponse{" +
+                "term=" + term +
+                ", success=" + success +
+                '}';
+    }
 }

@@ -48,12 +48,24 @@ public class NodeImpl implements DKVSNode, Runnable{
         InputStream inputStream = new FileInputStream(propFileName);
         properties.load(inputStream);
 
+        final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        final Runnable timeoutChecker = new Runnable() {
+            public void run() {
+                //no interaction from leader received
+                if (nodeState != NodeState.LEADER) {
+                    //startElection();
+                }
+            }
+        };
+        scheduler.scheduleWithFixedDelay(timeoutChecker, 200, 200, TimeUnit.MILLISECONDS);
+
         self = new Server();
         Kryo kryo = self.getKryo();
         kryo.register(ElectionVoteRequest.class);
         kryo.register(ElectionVoteResponse.class);
         kryo.register(AppendEntriesRequest.class);
         kryo.register(AppendEntriesResponse.class);
+        kryo.register(ArrayList.class);
         kryo.register(String.class);
         self.addListener(new Listener() {
             @Override
@@ -61,7 +73,7 @@ public class NodeImpl implements DKVSNode, Runnable{
                 super.received(connection, object);
 
                 if (object instanceof Request) {
-                    Logger.getGlobal().log(Level.INFO, object.getClass().getName());
+                    Log.info("Messaging", String.format("Node %d received request: %s", nodeId, object.toString()));
                 }
 
                 if (object instanceof AppendEntriesRequest) {
@@ -72,6 +84,7 @@ public class NodeImpl implements DKVSNode, Runnable{
                     if (nodeState == NodeState.CANDIDATE) {
                         nodeState = NodeState.FOLLOWER;
                     }
+                    scheduler.scheduleWithFixedDelay(timeoutChecker, 200, 200, TimeUnit.MILLISECONDS);
                     AppendEntriesRequest request = (AppendEntriesRequest) object;
                     if (!stateMachine.checkEntryValidity(request.getPrevLogIndex(),request.getPrevLogTerm())) {
                         connection.sendTCP(new AppendEntriesResponse(currentTerm, false));
@@ -131,19 +144,23 @@ public class NodeImpl implements DKVSNode, Runnable{
             kryo.register(ElectionVoteResponse.class);
             kryo.register(AppendEntriesRequest.class);
             kryo.register(AppendEntriesResponse.class);
+            kryo.register(ArrayList.class);
             kryo.register(String.class);
             client[i].addListener(new Listener() {
                 @Override
                 public void received(Connection connection, Object object) {
                     super.received(connection, object);
                     if (object instanceof Response) {
-                        Logger.getGlobal().log(Level.INFO, object.toString());
+                        Log.info("Messaging", String.format("Node %d received response: %s", nodeId, object.toString()));
                     }
                     if (object instanceof ElectionVoteResponse) {
                         if (((ElectionVoteResponse) object).getTerm() == currentTerm &&
                                 ((ElectionVoteResponse) object).isVoteGranted()) {
                             votesReceived++;
                         }
+                    }
+                    if (object instanceof AppendEntriesResponse) {
+
                     }
                 }
             });
@@ -162,6 +179,8 @@ public class NodeImpl implements DKVSNode, Runnable{
 
     @Override
     public void startElection() {
+        Log.info("Election", String.format("Node %d has started election", nodeId));
+
         this.nodeState = NodeState.CANDIDATE;
         this.currentTerm++;
         this.votedFor = this.nodeId;
@@ -175,8 +194,9 @@ public class NodeImpl implements DKVSNode, Runnable{
             public void run() {
                 if (votesReceived > Constants.SERVER_COUNT / 2) {
                     nodeState = NodeState.LEADER;
-                    Logger.getGlobal().log(Level.INFO,
-                            "Node " + nodeId + " became leader with " + votesReceived + " votes in term " + currentTerm);
+                    Log.info("Election", String.format("Node %d became leader with %d votes in term %d",
+                            nodeId, votesReceived, currentTerm));
+                    sendRequests();
                     scheduler.shutdown();
                 }
             }
@@ -213,16 +233,42 @@ public class NodeImpl implements DKVSNode, Runnable{
                 String[] addressParts = address.split(":");
                 client[i].connect(5000, addressParts[0], Integer.parseInt(addressParts[1]));
             } catch (IOException e) {
-                //e.printStackTrace();
+                Log.error("Exception caught: " + e.getMessage());
             }
         }
+    }
+
+    private void sendRequests() {
+        final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        final ExecutorService executor = Executors.newFixedThreadPool(Constants.SERVER_COUNT - 1);
+        scheduler.scheduleAtFixedRate(new Runnable() {
+                @Override
+                public void run() {
+                    Collection<Callable<Response>> tasks = new ArrayList<>();
+                    for (int i = 1; i <= Constants.SERVER_COUNT; i++) {
+                        if (i == nodeId) {
+                            continue;
+                        }
+                        tasks.add(new SendPackageTask(client[i], new AppendEntriesRequest(currentTerm, nodeId, 0, 0, 0)));
+                    }
+                    try {
+                        executor.invokeAll(tasks);
+                        if (nodeState != NodeState.LEADER) {
+                            executor.shutdownNow();
+                            scheduler.shutdownNow();
+                        }
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+        }, 0, 200, TimeUnit.MILLISECONDS);
     }
 
     @Override
     public void run() {
         connectToSiblings();
         if (nodeId == 1)
-            startElection();
+            startElection(); //TODO: find out if nondeterministic election works
     }
 
     public void stop() {
