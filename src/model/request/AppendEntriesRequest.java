@@ -15,14 +15,15 @@ public class AppendEntriesRequest extends Request {
     int prevLogIndex;
     int prevLogTerm;
     int leaderCommit;
-    ArrayList<Entry> entries = new ArrayList<>();
+    ArrayList<Entry> entries;
 
-    public AppendEntriesRequest(int term, int leaderId, int prevLogIndex, int prevLogTerm, int leaderCommit) {
+    public AppendEntriesRequest(int term, int leaderId, int prevLogIndex, int prevLogTerm, int leaderCommit, ArrayList<Entry> entries) {
         this.term = term;
         this.leaderId = leaderId;
         this.prevLogIndex = prevLogIndex;
         this.prevLogTerm = prevLogTerm;
         this.leaderCommit = leaderCommit;
+        this.entries = entries;
     }
 
     public AppendEntriesRequest() {

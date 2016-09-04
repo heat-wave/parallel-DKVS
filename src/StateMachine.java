@@ -1,3 +1,4 @@
+import com.esotericsoftware.minlog.Log;
 import model.Entry;
 
 import java.io.*;
@@ -8,18 +9,22 @@ import java.util.Scanner;
 /**
  * Created by heat_wave on 6/19/16.
  */
-public class StateMachine {
+class StateMachine {
     private HashMap<String, String> map;
     private ArrayList<Entry> entries;
-    private PrintWriter fileWriter;
+    private FileWriter fileWriter;
 
-    public StateMachine(File file) {
+    private File file;
+
+    StateMachine(File file) {
+        this.file = file;
+
         try (FileWriter fw = new FileWriter(file);
-            BufferedWriter bw = new BufferedWriter(fw);
-            PrintWriter out = new PrintWriter(bw);
             Scanner in = new Scanner(file)) {
 
-            fileWriter = out;
+            entries = new ArrayList<>();
+
+            fileWriter = fw;
 
             Entry.Type type = null;
             String key = null;
@@ -44,33 +49,58 @@ public class StateMachine {
                 int index = in.nextInt();
                 entries.add(new Entry(type, key, value, term, index));
             }
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
         } catch (IOException e) {
-
+            Log.error("Exception", e.getMessage());
         }
     }
 
-    public void appendEntry(Entry entry) {
-        fileWriter.append(entry.toString());
-        fileWriter.flush();
+    void appendEntries(int from, ArrayList<Entry> toAppend) {
+        if (toAppend.isEmpty()) {
+            return; //heartbeat received
+        }
+        int pos = from;
+        while (pos < entries.size() && entries.get(pos).equals(toAppend.get(pos - from))) {
+            pos++;
+        }
+        entries.retainAll(entries.subList(0, pos));
+        entries.addAll(toAppend.subList(pos - from, toAppend.size()));
+        rewriteLog();
     }
 
-    public void appendEntries(ArrayList<Entry> toAppend) {
-        int i = 0;
-        while (i < toAppend.size() && i < entries.size() && entries.get(i).equals(toAppend.get(i))) {
-            i++;
+    private void rewriteLog() {
+        try {
+            fileWriter = new FileWriter(file, false);
+            for (Entry entry : entries) {
+                fileWriter.write(entry.toString() + '\n');
+            }
+            fileWriter.flush();
+        } catch (IOException e) {
+            Log.error("Exception", e.getMessage());
         }
-        entries.retainAll(entries.subList(0, i));
-        entries.addAll(toAppend.subList(i, toAppend.size()));
     }
 
     Entry getLastLogEntry() {
-        return entries != null ? entries.get(entries.size() - 1) : null;
+        return entries == null || entries.isEmpty() ?  null : entries.get(entries.size() - 1);
     }
 
     boolean checkEntryValidity(int index, int term) {
         Entry toCheck = entries != null ? entries.get(index) : null;
         return toCheck != null && toCheck.getTerm() == term;
+    }
+
+    int getLogSize() {
+        return entries.size();
+    }
+
+    Entry getEntry(int index) {
+        return index >= 0 && index < entries.size() ? entries.get(index) : null;
+    }
+
+    ArrayList<Entry> getEntriesStartingWith(int startIndex) {
+        ArrayList<Entry> result = new ArrayList<>();
+        for (int i = startIndex; i < entries.size(); i++) {
+            result.add(entries.get(i));
+        }
+        return result;
     }
 }

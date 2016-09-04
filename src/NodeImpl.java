@@ -24,8 +24,8 @@ public class NodeImpl implements DKVSNode, Runnable{
 
     private NodeState nodeState = NodeState.FOLLOWER;
 
-    private int [] nextIndex;
-    private int [] matchIndex;
+    private int [] nextIndex = new int[Constants.SERVER_COUNT + 1];
+    private int [] matchIndex = new int[Constants.SERVER_COUNT + 1];
 
     private Client[] client;
     private Server self;
@@ -61,12 +61,13 @@ public class NodeImpl implements DKVSNode, Runnable{
 
         self = new Server();
         Kryo kryo = self.getKryo();
+        kryo.register(ArrayList.class);
+        kryo.register(String.class);
+        kryo.register(Entry.class);
         kryo.register(ElectionVoteRequest.class);
         kryo.register(ElectionVoteResponse.class);
         kryo.register(AppendEntriesRequest.class);
         kryo.register(AppendEntriesResponse.class);
-        kryo.register(ArrayList.class);
-        kryo.register(String.class);
         self.addListener(new Listener() {
             @Override
             public void received(Connection connection, Object object) {
@@ -86,11 +87,15 @@ public class NodeImpl implements DKVSNode, Runnable{
                     }
                     scheduler.scheduleWithFixedDelay(timeoutChecker, 200, 200, TimeUnit.MILLISECONDS);
                     AppendEntriesRequest request = (AppendEntriesRequest) object;
+                    if (request.getEntries().isEmpty()) {
+                        connection.sendTCP(new AppendEntriesResponse(currentTerm, true));
+                        return;
+                    }
                     if (!stateMachine.checkEntryValidity(request.getPrevLogIndex(),request.getPrevLogTerm())) {
                         connection.sendTCP(new AppendEntriesResponse(currentTerm, false));
                         return;
                     }
-                    stateMachine.appendEntries(request.getEntries());
+                    stateMachine.appendEntries(request.getPrevLogIndex(), request.getEntries());
                     if (request.getLeaderCommit() > commitIndex) {
                         commitIndex = Math.min(request.getLeaderCommit(), stateMachine.getLastLogEntry().getIndex());
                     }
@@ -140,12 +145,14 @@ public class NodeImpl implements DKVSNode, Runnable{
             client[i] = new Client();
             client[i].start();
             kryo = client[i].getKryo();
+            kryo.register(ArrayList.class);
+            kryo.register(String.class);
+            kryo.register(Entry.class);
             kryo.register(ElectionVoteRequest.class);
             kryo.register(ElectionVoteResponse.class);
             kryo.register(AppendEntriesRequest.class);
             kryo.register(AppendEntriesResponse.class);
-            kryo.register(ArrayList.class);
-            kryo.register(String.class);
+            int finalI = i;
             client[i].addListener(new Listener() {
                 @Override
                 public void received(Connection connection, Object object) {
@@ -160,7 +167,19 @@ public class NodeImpl implements DKVSNode, Runnable{
                         }
                     }
                     if (object instanceof AppendEntriesResponse) {
-
+                        currentTerm = Math.max(currentTerm, ((AppendEntriesResponse) object).getTerm());
+                        if (!((AppendEntriesResponse) object).isSuccess()) {
+                            nextIndex[finalI]--;
+                            client[finalI].sendTCP(new AppendEntriesRequest(
+                                    currentTerm,
+                                    nodeId,
+                                    nextIndex[finalI] - 1,
+                                    stateMachine.getEntry(nextIndex[finalI] - 1).getTerm(),
+                                    commitIndex,
+                                    stateMachine.getEntriesStartingWith(nextIndex[finalI] - 1)));
+                        } else {
+                            //so what?
+                        }
                     }
                 }
             });
@@ -196,6 +215,12 @@ public class NodeImpl implements DKVSNode, Runnable{
                     nodeState = NodeState.LEADER;
                     Log.info("Election", String.format("Node %d became leader with %d votes in term %d",
                             nodeId, votesReceived, currentTerm));
+                    for (int i = 1; i <= Constants.SERVER_COUNT; i++) {
+                        if (i == nodeId) {
+                            continue;
+                        }
+                        nextIndex[i] = stateMachine.getLogSize() + 1;
+                    }
                     sendRequests();
                     scheduler.shutdown();
                 }
@@ -216,7 +241,7 @@ public class NodeImpl implements DKVSNode, Runnable{
         try {
             executor.invokeAll(tasks);
         } catch (InterruptedException e) {
-            Logger.getGlobal().log(Level.SEVERE, e.getMessage());
+            Log.error("Interruption: ", e.getMessage());
         }
 
         executor.shutdown(); //always reclaim resources
@@ -233,7 +258,7 @@ public class NodeImpl implements DKVSNode, Runnable{
                 String[] addressParts = address.split(":");
                 client[i].connect(5000, addressParts[0], Integer.parseInt(addressParts[1]));
             } catch (IOException e) {
-                Log.error("Exception caught: " + e.getMessage());
+                Log.error("Exception caught: ", e.getMessage());
             }
         }
     }
@@ -249,7 +274,13 @@ public class NodeImpl implements DKVSNode, Runnable{
                         if (i == nodeId) {
                             continue;
                         }
-                        tasks.add(new SendPackageTask(client[i], new AppendEntriesRequest(currentTerm, nodeId, 0, 0, 0)));
+                        tasks.add(new SendPackageTask(client[i], new AppendEntriesRequest(
+                                currentTerm,
+                                nodeId,
+                                nextIndex[i] - 1,
+                                stateMachine.getEntry(nextIndex[i] - 1) == null ? currentTerm : stateMachine.getEntry(nextIndex[i] - 1).getTerm(),
+                                commitIndex,
+                                stateMachine.getEntriesStartingWith(nextIndex[i] - 1))));
                     }
                     try {
                         executor.invokeAll(tasks);
