@@ -18,6 +18,9 @@ public class Entry {
         this.index = index;
     }
 
+    public Entry() {
+    }
+
     public Type getType() {
         return type;
     }

@@ -8,6 +8,7 @@ import java.util.logging.Logger;
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryonet.*;
 import com.esotericsoftware.minlog.Log;
+import com.sun.istack.internal.Nullable;
 import model.*;
 import model.request.*;
 import model.response.*;
@@ -64,6 +65,7 @@ public class NodeImpl implements DKVSNode, Runnable{
         kryo.register(ArrayList.class);
         kryo.register(String.class);
         kryo.register(Entry.class);
+        kryo.register(Entry.Type.class);
         kryo.register(ElectionVoteRequest.class);
         kryo.register(ElectionVoteResponse.class);
         kryo.register(AppendEntriesRequest.class);
@@ -148,6 +150,7 @@ public class NodeImpl implements DKVSNode, Runnable{
             kryo.register(ArrayList.class);
             kryo.register(String.class);
             kryo.register(Entry.class);
+            kryo.register(Entry.Type.class);
             kryo.register(ElectionVoteRequest.class);
             kryo.register(ElectionVoteResponse.class);
             kryo.register(AppendEntriesRequest.class);
@@ -295,6 +298,10 @@ public class NodeImpl implements DKVSNode, Runnable{
         }, 0, 200, TimeUnit.MILLISECONDS);
     }
 
+    void addEntryFromClient(Entry.Type type, String key, @Nullable String value) {
+        stateMachine.addEntryFromClient(new Entry(type, key, value, currentTerm, stateMachine.getLogSize()));
+    }
+
     @Override
     public void run() {
         connectToSiblings();
@@ -302,7 +309,7 @@ public class NodeImpl implements DKVSNode, Runnable{
             startElection(); //TODO: find out if nondeterministic election works
     }
 
-    public void stop() {
+    void stop() {
         self.stop();
     }
 

@@ -10,7 +10,7 @@ import java.util.Scanner;
  * Created by heat_wave on 6/19/16.
  */
 class StateMachine {
-    private HashMap<String, String> map;
+    private HashMap<String, String> map = new HashMap<>();
     private ArrayList<Entry> entries;
     private FileWriter fileWriter;
 
@@ -19,12 +19,9 @@ class StateMachine {
     StateMachine(File file) {
         this.file = file;
 
-        try (FileWriter fw = new FileWriter(file);
-            Scanner in = new Scanner(file)) {
+        try (Scanner in = new Scanner(file)) {
 
             entries = new ArrayList<>();
-
-            fileWriter = fw;
 
             Entry.Type type = null;
             String key = null;
@@ -32,13 +29,13 @@ class StateMachine {
 
             while (in.hasNext()) {
                 switch (in.next()) {
-                    case "set":
+                    case "SET":
                         key = in.next();
                         value = in.next();
                         type = Entry.Type.SET;
                         map.put(key, value);
                         break;
-                    case "delete":
+                    case "DELETE":
                         key = in.next();
                         value = null;
                         type = Entry.Type.DELETE;
@@ -49,6 +46,11 @@ class StateMachine {
                 int index = in.nextInt();
                 entries.add(new Entry(type, key, value, term, index));
             }
+        } catch (IOException e) {
+            Log.error("Exception", e.getMessage());
+        }
+        try {
+            fileWriter = new FileWriter(file);
         } catch (IOException e) {
             Log.error("Exception", e.getMessage());
         }
@@ -84,7 +86,7 @@ class StateMachine {
     }
 
     boolean checkEntryValidity(int index, int term) {
-        Entry toCheck = entries != null ? entries.get(index) : null;
+        Entry toCheck = entries != null && entries.size() > index ? entries.get(index) : null;
         return toCheck != null && toCheck.getTerm() == term;
     }
 
@@ -102,5 +104,11 @@ class StateMachine {
             result.add(entries.get(i));
         }
         return result;
+    }
+
+    void addEntryFromClient(Entry entry) {
+        ArrayList<Entry> toAppend = new ArrayList<>();
+        toAppend.add(entry);
+        appendEntries(entries.size(), toAppend);
     }
 }

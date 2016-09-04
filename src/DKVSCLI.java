@@ -1,3 +1,6 @@
+import com.esotericsoftware.minlog.Log;
+import model.Entry;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
@@ -9,7 +12,8 @@ import java.util.Scanner;
 public class DKVSCLI {
 
     public static void main(String[] args) throws IOException {
-        if (args.length != 1 || args[0].equals("--help")) {
+        //Log.set(Log.LEVEL_NONE);
+        if (args.length == 1 && args[0].equals("--help")) {
             System.out.println("DKVS CLI usage:\n" +
                     "\t-type 'node X' to start DKVS node №X\n" +
                     "\t-type 'kill N' to kill DKVS node number N\n" +
@@ -41,17 +45,17 @@ public class DKVSCLI {
                     nodes[pos].run();
                     break;
                 case "add":
-                    int key = in.nextInt();
-                    int value = in.nextInt();
-                    //???
+                    String key = in.next();
+                    String value = in.next();
+                    nodes[1].addEntryFromClient(Entry.Type.SET, key, value); //TODO: implement properly
                     break;
                 case "remove":
-                    key = in.nextInt();
-                    //???
+                    key = in.next();
+                    //TODO: implement
                     break;
                 case "get":
-                    key = in.nextInt();
-                    //???
+                    key = in.next();
+                    //TODO: implement
                     break;
             }
         }
