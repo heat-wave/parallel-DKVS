@@ -49,11 +49,7 @@ class StateMachine {
         } catch (IOException e) {
             Log.error("Exception", e.getMessage());
         }
-        try {
-            fileWriter = new FileWriter(file);
-        } catch (IOException e) {
-            Log.error("Exception", e.getMessage());
-        }
+        rewriteLog();
     }
 
     void appendEntries(int from, ArrayList<Entry> toAppend) {
@@ -87,7 +83,7 @@ class StateMachine {
 
     boolean checkEntryValidity(int index, int term) {
         Entry toCheck = entries != null && entries.size() > index ? entries.get(index) : null;
-        return toCheck != null && toCheck.getTerm() == term;
+        return index == entries.size() || toCheck != null && toCheck.getTerm() == term;
     }
 
     int getLogSize() {
@@ -110,5 +106,9 @@ class StateMachine {
         ArrayList<Entry> toAppend = new ArrayList<>();
         toAppend.add(entry);
         appendEntries(entries.size(), toAppend);
+    }
+
+    String get(String key) {
+        return map.getOrDefault(key, null);
     }
 }

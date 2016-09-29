@@ -5,5 +5,4 @@ public class Constants {
     private Constants() {}
 
     public static int SERVER_COUNT = 5;
-    public static int PORT_GROUP = 4000;
 }
