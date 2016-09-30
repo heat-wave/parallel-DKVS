@@ -17,7 +17,7 @@ import java.util.Scanner;
  * Created by heat_wave on 9/29/16.
  */
 public class ClientApp {
-    Client[] clients = new Client[6];
+    Client[] clients = new Client[Constants.SERVER_COUNT + 1];
     Properties properties;
 
     public static void main(String[] args) throws IOException {
@@ -62,7 +62,7 @@ public class ClientApp {
                 case "add":
                     String key = in.next();
                     String value = in.next();
-                    clients[index].sendTCP(new ClientAddRequest(key, value)); //nodes[1].addEntryFromClient(Entry.Type.SET, key, value);
+                    clients[index].sendTCP(new ClientAddRequest(key, value));
                     break;
                 case "remove":
                     key = in.next();

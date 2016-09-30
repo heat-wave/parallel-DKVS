@@ -21,7 +21,6 @@ public class NodeImpl implements DKVSNode, Runnable{
     private int currentTerm = 0;
     private int commitIndex = 0;
     private int lastApplied = 0;
-    private ArrayList<Command> log;
 
     private NodeState nodeState = NodeState.FOLLOWER;
 
@@ -38,20 +37,24 @@ public class NodeImpl implements DKVSNode, Runnable{
 
     private int nodeId;
     private Properties properties;
-    Integer votedFor = null;
-    int votesReceived = 0;
+    private Integer votedFor = null;
+    private int votesReceived = 0;
     private ScheduledFuture electionFuture;
 
     public NodeImpl(int id) throws IOException {
         this.nodeId = id;
         String filename = String.format("dkvs_%d.log", this.nodeId);
         this.stateMachine = new StateMachine(new File(filename));
+        if (stateMachine.getLogSize() > 0) {
+            this.currentTerm = stateMachine.getLastLogEntry().getTerm();
+        }
 
         properties = new Properties();
         String propFileName = "dkvs.properties";
         InputStream inputStream = new FileInputStream(propFileName);
         properties.load(inputStream);
-        timeout = Integer.parseInt(properties.getProperty("timeout"));
+        timeout = new Random().nextInt(150) + 1500;
+        //timeout = Integer.parseInt(properties.getProperty("timeout"));
 
         final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
         final Runnable timeoutChecker = () -> {
@@ -99,6 +102,11 @@ public class NodeImpl implements DKVSNode, Runnable{
                     stateMachine.appendEntries(request.getPrevLogIndex(), request.getEntries());
                     if (request.getLeaderCommit() > commitIndex) {
                         commitIndex = Math.min(request.getLeaderCommit(), stateMachine.getLastLogEntry().getIndex());
+                    }
+                    if (commitIndex >= lastApplied) {
+                        stateMachine.apply(lastApplied);
+                        Log.info("Log", String.format("Applied entry #%d on server %d", lastApplied, nodeId));
+                        lastApplied++;
                     }
                     connection.sendTCP(new AppendEntriesResponse(currentTerm, true));
                 }
@@ -189,22 +197,13 @@ public class NodeImpl implements DKVSNode, Runnable{
                                     commitIndex,
                                     stateMachine.getEntriesStartingWith(nextIndex[finalI] - 1)));
                         } else {
-                            //so what?
+                            matchIndex[finalI] = nextIndex[finalI];
+                            nextIndex[finalI] = Math.min(nextIndex[finalI] + 1, stateMachine.getLogSize() + 1);
                         }
                     }
                 }
             });
         }
-    }
-
-    @Override
-    public ElectionVoteResponse requestVote(int term, int candidateId, int lastLogIndex, int lastLogerm) {
-        return null;
-    }
-
-    @Override
-    public AppendEntriesResponse appendEntries(int term, int leaderId, int prevLogIndex, List<String> entries, int leaderCommitIndex) {
-        return null;
     }
 
     @Override
@@ -220,21 +219,21 @@ public class NodeImpl implements DKVSNode, Runnable{
         final ExecutorService executor = Executors.newFixedThreadPool(Constants.SERVER_COUNT - 1);
         final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
-        final Runnable voteChecker = new Runnable() {
-            public void run() {
-                if (votesReceived > Constants.SERVER_COUNT / 2) {
-                    nodeState = NodeState.LEADER;
-                    Log.info("Election", String.format("Node %d became leader with %d votes in term %d",
-                            nodeId, votesReceived, currentTerm));
-                    for (int i = 1; i <= Constants.SERVER_COUNT; i++) {
-                        if (i == nodeId) {
-                            continue;
-                        }
-                        nextIndex[i] = stateMachine.getLogSize() + 1;
+        final Runnable voteChecker = () -> {
+            if (votesReceived > Constants.SERVER_COUNT / 2) {
+                nodeState = NodeState.LEADER;
+                Log.info("Election", String.format("Node %d became leader with %d votes in term %d",
+                        nodeId, votesReceived, currentTerm));
+                commitIndex = 0;
+                for (int i = 1; i <= Constants.SERVER_COUNT; i++) {
+                    if (i == nodeId) {
+                        continue;
                     }
-                    sendRequests();
-                    scheduler.shutdown();
+                    nextIndex[i] = stateMachine.getLogSize() + 1;
+                    matchIndex[i] = 0;
                 }
+                sendRequests();
+                scheduler.shutdown();
             }
         };
         scheduler.scheduleWithFixedDelay(voteChecker, electionTimeout, electionTimeout, TimeUnit.MILLISECONDS);
@@ -277,49 +276,49 @@ public class NodeImpl implements DKVSNode, Runnable{
     private void sendRequests() {
         final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
         final ExecutorService executor = Executors.newFixedThreadPool(Constants.SERVER_COUNT - 1);
-        scheduler.scheduleAtFixedRate(new Runnable() {
-                @Override
-                public void run() {
-                    Collection<Callable<Response>> tasks = new ArrayList<>();
-                    for (int i = 1; i <= Constants.SERVER_COUNT; i++) {
-                        if (i == nodeId) {
-                            continue;
-                        }
-                        tasks.add(new SendPackageTask(client[i], new AppendEntriesRequest(
-                                currentTerm,
-                                nodeId,
-                                nextIndex[i] - 1,
-                                stateMachine.getEntry(nextIndex[i] - 1) == null ? currentTerm :
-                                        stateMachine.getEntry(nextIndex[i] - 1).getTerm(),
-                                commitIndex,
-                                stateMachine.getEntriesStartingWith(nextIndex[i] - 1))));
-                    }
-                    try {
-                        executor.invokeAll(tasks);
-                        if (nodeState != NodeState.LEADER) {
-                            executor.shutdownNow();
-                            scheduler.shutdownNow();
-                        }
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
+        scheduler.scheduleAtFixedRate(() -> {
+            Collection<Callable<Response>> tasks = new ArrayList<>();
+            for (int i = 1; i <= Constants.SERVER_COUNT; i++) {
+                if (i == nodeId) {
+                    continue;
+                }
+                tasks.add(new SendPackageTask(client[i], new AppendEntriesRequest(
+                        currentTerm,
+                        nodeId,
+                        nextIndex[i] - 1,
+                        stateMachine.getEntry(nextIndex[i] - 1) == null ? currentTerm :
+                                stateMachine.getEntry(nextIndex[i] - 1).getTerm(),
+                        commitIndex,
+                        stateMachine.getEntriesStartingWith(nextIndex[i] - 1))));
+            }
+            try {
+                executor.invokeAll(tasks);
+                Log.info("Match indices", Arrays.toString(matchIndex));
+                int appliedCount = 0;
+                matchIndex[nodeId] = stateMachine.getLogSize() + 1;
+                for (int i = 1; i <= Constants.SERVER_COUNT; i++) { //get only majority!
+                    if (matchIndex[i] > lastApplied) {
+                        appliedCount++;
                     }
                 }
+                if (appliedCount * 2 > Constants.SERVER_COUNT) {
+                    stateMachine.apply(lastApplied);
+                    commitIndex = lastApplied;
+                    lastApplied++;
+                }
+                if (nodeState != NodeState.LEADER) {
+                    executor.shutdownNow();
+                    scheduler.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                Log.error("Interruption", e.getMessage());
+            }
         }, 0, timeout, TimeUnit.MILLISECONDS);
-    }
-
-    void addEntryFromClient(Entry.Type type, String key, @Nullable String value) {
-        stateMachine.addEntryFromClient(new Entry(type, key, value, currentTerm, stateMachine.getLogSize()));
-    }
-
-    public String get(String key) {
-        return stateMachine.get(key);
     }
 
     @Override
     public void run() {
         connectToSiblings();
-//        if (nodeId == 1)
-//            startElection(); //TODO: find out if nondeterministic election works
     }
 
     void stop() {

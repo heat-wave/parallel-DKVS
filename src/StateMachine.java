@@ -17,11 +17,19 @@ class StateMachine {
     private File file;
 
     StateMachine(File file) {
+        if (!file.exists()) {
+            try {
+                file.createNewFile();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
         this.file = file;
 
         try (Scanner in = new Scanner(file)) {
 
             entries = new ArrayList<>();
+            //entries.add(null);
 
             Entry.Type type = null;
             String key = null;
@@ -33,13 +41,13 @@ class StateMachine {
                         key = in.next();
                         value = in.next();
                         type = Entry.Type.SET;
-                        map.put(key, value);
+                        //map.put(key, value);
                         break;
                     case "DELETE":
                         key = in.next();
                         value = null;
                         type = Entry.Type.DELETE;
-                        map.remove(key);
+                        //map.remove(key);
                         break;
                 }
                 int term = in.nextInt();
@@ -65,10 +73,26 @@ class StateMachine {
         rewriteLog();
     }
 
+    void apply(int index) {
+        Entry entry = entries.get(index);
+        String key = entry.getKey();
+        String value = entry.getValue();
+        switch (entry.getType()) {
+            case SET:
+                map.put(key, value);
+                break;
+            case DELETE:
+                map.remove(key);
+        }
+    }
+
     private void rewriteLog() {
         try {
             fileWriter = new FileWriter(file, false);
             for (Entry entry : entries) {
+                if (entry == null) {
+                    continue;
+                }
                 fileWriter.write(entry.toString() + '\n');
             }
             fileWriter.flush();
