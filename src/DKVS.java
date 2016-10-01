@@ -33,6 +33,7 @@ public class DKVS {
                     break;
                 case "node":
                     pos = in.nextInt();
+                    nodes[pos] = new NodeImpl(pos);
                     nodes[pos].run();
                     break;
             }

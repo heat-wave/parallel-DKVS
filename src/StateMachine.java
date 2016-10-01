@@ -50,8 +50,8 @@ class StateMachine {
                         //map.remove(key);
                         break;
                 }
-                int term = in.nextInt();
                 int index = in.nextInt();
+                int term = in.nextInt();
                 entries.add(new Entry(type, key, value, term, index));
             }
         } catch (IOException e) {

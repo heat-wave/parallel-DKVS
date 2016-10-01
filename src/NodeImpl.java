@@ -53,8 +53,8 @@ public class NodeImpl implements DKVSNode, Runnable{
         String propFileName = "dkvs.properties";
         InputStream inputStream = new FileInputStream(propFileName);
         properties.load(inputStream);
-        timeout = new Random().nextInt(150) + 1500;
-        //timeout = Integer.parseInt(properties.getProperty("timeout"));
+        //timeout = new Random().nextInt(150) + 1500;
+        timeout = Integer.parseInt(properties.getProperty("timeout"));
 
         final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
         final Runnable timeoutChecker = () -> {
@@ -63,7 +63,8 @@ public class NodeImpl implements DKVSNode, Runnable{
                 startElection();
             }
         };
-        electionFuture = scheduler.scheduleWithFixedDelay(timeoutChecker, timeout, timeout, TimeUnit.MILLISECONDS);
+        int electionTimeout = timeout + 100 + new Random().nextInt(200);
+        electionFuture = scheduler.scheduleWithFixedDelay(timeoutChecker, electionTimeout, electionTimeout, TimeUnit.MILLISECONDS);
 
         self = new Server();
         Utils.registerClasses(self.getKryo());
@@ -82,13 +83,14 @@ public class NodeImpl implements DKVSNode, Runnable{
                         connection.sendTCP(new AppendEntriesResponse(currentTerm, false));
                         return;
                     }
+                    currentTerm = Math.max(currentTerm, ((AppendEntriesRequest) object).getTerm());
                     if (nodeState == NodeState.CANDIDATE) {
                         nodeState = NodeState.FOLLOWER;
                         votedFor = null;
                         votesReceived = 0;
                     }
                     electionFuture.cancel(true);
-                    electionFuture = scheduler.scheduleWithFixedDelay(timeoutChecker, timeout, timeout, TimeUnit.MILLISECONDS);
+                    electionFuture = scheduler.scheduleWithFixedDelay(timeoutChecker, electionTimeout, electionTimeout, TimeUnit.MILLISECONDS);
                     AppendEntriesRequest request = (AppendEntriesRequest) object;
                     leaderId = request.getLeaderId();
                     if (request.getEntries().isEmpty()) {
@@ -105,27 +107,30 @@ public class NodeImpl implements DKVSNode, Runnable{
                     }
                     if (commitIndex >= lastApplied) {
                         stateMachine.apply(lastApplied);
-                        Log.info("Log", String.format("Applied entry #%d on server %d", lastApplied, nodeId));
+                        Log.debug("Log", String.format("Applied entry #%d on server %d", lastApplied, nodeId));
                         lastApplied++;
                     }
                     connection.sendTCP(new AppendEntriesResponse(currentTerm, true));
                 }
                 if (object instanceof ElectionVoteRequest) {
                     if (((ElectionVoteRequest) object).getTerm() < currentTerm) {
+                        Log.debug("Election", String.format("Server %d did not grant vote to node %d: its term is smaller", nodeId, ((ElectionVoteRequest) object).getCandidateId()));
                         connection.sendTCP(new ElectionVoteResponse(currentTerm, false));
                         return;
                     }
                     currentTerm = ((ElectionVoteRequest) object).getTerm();
-                    if (votedFor == null || votedFor == ((ElectionVoteRequest) object).getTerm()) {
+                    if (votedFor == null || votedFor == ((ElectionVoteRequest) object).getCandidateId()) {
                         ElectionVoteRequest request = (ElectionVoteRequest) object;
                         Entry lastEntry = stateMachine.getLastLogEntry();
                         if (lastEntry == null || request.getLastLogIndex() >= lastEntry.getIndex() &&
                                 request.getLastLogTerm() >= lastEntry.getTerm()) {
                             votedFor = ((ElectionVoteRequest) object).getCandidateId();
+                            Log.debug("Election", String.format("Server %d granted vote to node %d", nodeId, ((ElectionVoteRequest) object).getCandidateId()));
                             connection.sendTCP(new ElectionVoteResponse(currentTerm, true));
                             return;
                         }
                     }
+                    Log.debug("Election", String.format("Server %d did not grant vote to node %d: its vote belongs to %d", nodeId, ((ElectionVoteRequest) object).getCandidateId(), votedFor));
                     connection.sendTCP(new ElectionVoteResponse(currentTerm, false));
                 }
                 if (object instanceof ClientGetRequest) {
@@ -236,7 +241,6 @@ public class NodeImpl implements DKVSNode, Runnable{
                 scheduler.shutdown();
             }
         };
-        scheduler.scheduleWithFixedDelay(voteChecker, electionTimeout, electionTimeout, TimeUnit.MILLISECONDS);
 
         Collection<Callable<Response>> tasks = new ArrayList<>();
         for (int i = 1; i <= Constants.SERVER_COUNT; i++) {
@@ -253,8 +257,9 @@ public class NodeImpl implements DKVSNode, Runnable{
         } catch (InterruptedException e) {
             Log.error("Interruption: ", e.getMessage());
         }
+        scheduler.scheduleWithFixedDelay(voteChecker, electionTimeout, electionTimeout, TimeUnit.MILLISECONDS);
 
-        executor.shutdown(); //always reclaim resources
+        //executor.shutdown(); //always reclaim resources
     }
 
     @Override

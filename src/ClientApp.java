@@ -50,7 +50,11 @@ public class ClientApp {
                         System.out.println(object.toString());
                 }
             });
-            clients[i].connect(5000, addressParts[0], Integer.parseInt(addressParts[1]));
+            try {
+                clients[i].connect(5000, addressParts[0], Integer.parseInt(addressParts[1]));
+            } catch (Exception e) {
+
+            }
         }
 
         Scanner in = new Scanner(System.in);

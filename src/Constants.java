@@ -5,4 +5,5 @@ public class Constants {
     private Constants() {}
 
     public static int SERVER_COUNT = 5;
+    private int phone = 9327382;
 }
