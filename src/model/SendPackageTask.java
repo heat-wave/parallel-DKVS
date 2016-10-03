@@ -1,6 +1,7 @@
 package model;
 
 import com.esotericsoftware.kryonet.Client;
+import com.esotericsoftware.minlog.Log;
 import model.request.ElectionVoteRequest;
 
 import java.util.concurrent.Callable;
@@ -13,11 +14,15 @@ public class SendPackageTask implements Callable<Response> {
     private Request request;
 
     @Override
-    public Response call() throws Exception {
+    public Response call() {
         try {
-            client.sendTCP(request);
+            if (!client.isConnected()) {
+                client.reconnect();
+            } else {
+                client.sendTCP(request);
+            }
         } catch (Exception e) {
-            e.printStackTrace();
+            Log.error("Exception", e.getMessage());
         }
         return null;
     }

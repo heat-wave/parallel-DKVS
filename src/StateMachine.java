@@ -29,7 +29,7 @@ class StateMachine {
         try (Scanner in = new Scanner(file)) {
 
             entries = new ArrayList<>();
-            //entries.add(null);
+            entries.add(null);
 
             Entry.Type type = null;
             String key = null;
@@ -41,13 +41,11 @@ class StateMachine {
                         key = in.next();
                         value = in.next();
                         type = Entry.Type.SET;
-                        //map.put(key, value);
                         break;
                     case "DELETE":
                         key = in.next();
-                        value = null;
+                        value = in.next();
                         type = Entry.Type.DELETE;
-                        //map.remove(key);
                         break;
                 }
                 int index = in.nextInt();
@@ -75,6 +73,9 @@ class StateMachine {
 
     void apply(int index) {
         Entry entry = entries.get(index);
+        if (entry == null) {
+            return;
+        }
         String key = entry.getKey();
         String value = entry.getValue();
         switch (entry.getType()) {
@@ -111,7 +112,7 @@ class StateMachine {
     }
 
     int getLogSize() {
-        return entries.size();
+        return entries.size() - 1;
     }
 
     Entry getEntry(int index) {
@@ -119,6 +120,7 @@ class StateMachine {
     }
 
     ArrayList<Entry> getEntriesStartingWith(int startIndex) {
+        startIndex = Math.max(startIndex, 1);
         ArrayList<Entry> result = new ArrayList<>();
         for (int i = startIndex; i < entries.size(); i++) {
             result.add(entries.get(i));

@@ -40,6 +40,7 @@ public class NodeImpl implements DKVSNode, Runnable{
     private Integer votedFor = null;
     private int votesReceived = 0;
     private ScheduledFuture electionFuture;
+    private ScheduledFuture votesReceivedFuture;
 
     public NodeImpl(int id) throws IOException {
         this.nodeId = id;
@@ -84,7 +85,7 @@ public class NodeImpl implements DKVSNode, Runnable{
                         return;
                     }
                     currentTerm = Math.max(currentTerm, ((AppendEntriesRequest) object).getTerm());
-                    if (nodeState == NodeState.CANDIDATE) {
+                    if (nodeState != NodeState.FOLLOWER) {
                         nodeState = NodeState.FOLLOWER;
                         votedFor = null;
                         votesReceived = 0;
@@ -106,9 +107,9 @@ public class NodeImpl implements DKVSNode, Runnable{
                         commitIndex = Math.min(request.getLeaderCommit(), stateMachine.getLastLogEntry().getIndex());
                     }
                     if (commitIndex >= lastApplied) {
+                        lastApplied = Math.min(lastApplied + 1, stateMachine.getLogSize());
                         stateMachine.apply(lastApplied);
                         Log.debug("Log", String.format("Applied entry #%d on server %d", lastApplied, nodeId));
-                        lastApplied++;
                     }
                     connection.sendTCP(new AppendEntriesResponse(currentTerm, true));
                 }
@@ -139,20 +140,24 @@ public class NodeImpl implements DKVSNode, Runnable{
                 }
                 if (object instanceof ClientAddRequest) {
                     if (nodeState != NodeState.LEADER) {
+                        Log.info("Log", String.format("Node %d forwarded an entry to leader %d", nodeId, leaderId));
                         client[leaderId].sendTCP(object);
                     } else {
                         ClientAddRequest request = (ClientAddRequest) object;
+                        Log.info("Log", String.format("Node %d added an entry %s", nodeId, request.toString()));
                         stateMachine.addEntryFromClient(new Entry(Entry.Type.SET, request.getKey(),
-                                request.getValue(), currentTerm, stateMachine.getLogSize()));
+                                request.getValue(), currentTerm, stateMachine.getLogSize() + 1));
                     }
                 }
                 if (object instanceof ClientRemoveRequest) {
                     if (nodeState != NodeState.LEADER) {
+                        Log.info("Log", String.format("Node %d forwarded an entry to leader %d", nodeId, leaderId));
                         client[leaderId].sendTCP(object);
                     } else {
                         ClientRemoveRequest request = (ClientRemoveRequest) object;
+                        Log.info("Log", String.format("Node %d added an entry %s", nodeId, request.toString()));
                         stateMachine.addEntryFromClient(new Entry(Entry.Type.DELETE, request.getKey(),
-                                null, currentTerm, stateMachine.getLogSize()));
+                                null, currentTerm, stateMachine.getLogSize() + 1));
                     }
                 }
             }
@@ -194,16 +199,17 @@ public class NodeImpl implements DKVSNode, Runnable{
                         currentTerm = Math.max(currentTerm, ((AppendEntriesResponse) object).getTerm());
                         if (!((AppendEntriesResponse) object).isSuccess()) {
                             nextIndex[finalI]--;
+                            Entry nextEntry = stateMachine.getEntry(nextIndex[finalI] - 1);
                             client[finalI].sendTCP(new AppendEntriesRequest(
                                     currentTerm,
                                     nodeId,
                                     nextIndex[finalI] - 1,
-                                    stateMachine.getEntry(nextIndex[finalI] - 1).getTerm(),
+                                    nextEntry == null ? currentTerm : nextEntry.getTerm(),
                                     commitIndex,
                                     stateMachine.getEntriesStartingWith(nextIndex[finalI] - 1)));
                         } else {
                             matchIndex[finalI] = nextIndex[finalI];
-                            nextIndex[finalI] = Math.min(nextIndex[finalI] + 1, stateMachine.getLogSize() + 1);
+                            nextIndex[finalI] = Math.min(nextIndex[finalI] + 1, stateMachine.getLogSize() + 2);
                         }
                     }
                 }
@@ -229,7 +235,8 @@ public class NodeImpl implements DKVSNode, Runnable{
                 nodeState = NodeState.LEADER;
                 Log.info("Election", String.format("Node %d became leader with %d votes in term %d",
                         nodeId, votesReceived, currentTerm));
-                commitIndex = 0;
+                //commitIndex = 0;
+                leaderId = nodeId;
                 for (int i = 1; i <= Constants.SERVER_COUNT; i++) {
                     if (i == nodeId) {
                         continue;
@@ -237,8 +244,8 @@ public class NodeImpl implements DKVSNode, Runnable{
                     nextIndex[i] = stateMachine.getLogSize() + 1;
                     matchIndex[i] = 0;
                 }
+                votesReceivedFuture.cancel(false);
                 sendRequests();
-                scheduler.shutdown();
             }
         };
 
@@ -257,9 +264,7 @@ public class NodeImpl implements DKVSNode, Runnable{
         } catch (InterruptedException e) {
             Log.error("Interruption: ", e.getMessage());
         }
-        scheduler.scheduleWithFixedDelay(voteChecker, electionTimeout, electionTimeout, TimeUnit.MILLISECONDS);
-
-        //executor.shutdown(); //always reclaim resources
+        votesReceivedFuture = scheduler.scheduleWithFixedDelay(voteChecker, electionTimeout, electionTimeout, TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -281,7 +286,7 @@ public class NodeImpl implements DKVSNode, Runnable{
     private void sendRequests() {
         final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
         final ExecutorService executor = Executors.newFixedThreadPool(Constants.SERVER_COUNT - 1);
-        scheduler.scheduleAtFixedRate(() -> {
+        scheduler.scheduleWithFixedDelay(() -> {
             Collection<Callable<Response>> tasks = new ArrayList<>();
             for (int i = 1; i <= Constants.SERVER_COUNT; i++) {
                 if (i == nodeId) {
@@ -298,22 +303,21 @@ public class NodeImpl implements DKVSNode, Runnable{
             }
             try {
                 executor.invokeAll(tasks);
+                Log.info("Next indices", Arrays.toString(nextIndex));
                 Log.info("Match indices", Arrays.toString(matchIndex));
+                Log.info("Last applied", Integer.toString(lastApplied));
                 int appliedCount = 0;
                 matchIndex[nodeId] = stateMachine.getLogSize() + 1;
-                for (int i = 1; i <= Constants.SERVER_COUNT; i++) { //get only majority!
+                for (int i = 1; i <= Constants.SERVER_COUNT; i++) {
                     if (matchIndex[i] > lastApplied) {
                         appliedCount++;
                     }
                 }
                 if (appliedCount * 2 > Constants.SERVER_COUNT) {
+                    lastApplied = Math.min(lastApplied + 1, stateMachine.getLogSize());
                     stateMachine.apply(lastApplied);
                     commitIndex = lastApplied;
-                    lastApplied++;
-                }
-                if (nodeState != NodeState.LEADER) {
-                    executor.shutdownNow();
-                    scheduler.shutdownNow();
+                    Log.debug("Log", String.format("Applied entry #%d on server %d", lastApplied, nodeId));
                 }
             } catch (InterruptedException e) {
                 Log.error("Interruption", e.getMessage());
@@ -328,6 +332,11 @@ public class NodeImpl implements DKVSNode, Runnable{
 
     void stop() {
         self.stop();
+        try {
+            self.dispose();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     private enum NodeState {

@@ -1,9 +1,11 @@
 package model.request;
 
+import model.Request;
+
 /**
  * Created by heat_wave on 9/29/16.
  */
-public class ClientAddRequest {
+public class ClientAddRequest extends Request {
     public String getKey() {
         return key;
     }
