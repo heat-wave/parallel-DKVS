@@ -17,6 +17,7 @@ public class SendPackageTask implements Callable<Response> {
     public Response call() {
         try {
             if (!client.isConnected()) {
+                //client.update(100);
                 client.reconnect();
             } else {
                 client.sendTCP(request);

@@ -72,6 +72,9 @@ class StateMachine {
     }
 
     void apply(int index) {
+        if (index >= entries.size()) {
+            return;
+        }
         Entry entry = entries.get(index);
         if (entry == null) {
             return;
@@ -108,7 +111,7 @@ class StateMachine {
 
     boolean checkEntryValidity(int index, int term) {
         Entry toCheck = entries != null && entries.size() > index ? entries.get(index) : null;
-        return index == entries.size() || toCheck != null && toCheck.getTerm() == term;
+        return index <= 0 || index == entries.size() || toCheck != null && toCheck.getTerm() == term;
     }
 
     int getLogSize() {
@@ -120,10 +123,9 @@ class StateMachine {
     }
 
     ArrayList<Entry> getEntriesStartingWith(int startIndex) {
-        startIndex = Math.max(startIndex, 1);
         ArrayList<Entry> result = new ArrayList<>();
-        for (int i = startIndex; i < entries.size(); i++) {
-            result.add(entries.get(i));
+        if (startIndex > 0) {
+            result.add(entries.get(startIndex));
         }
         return result;
     }

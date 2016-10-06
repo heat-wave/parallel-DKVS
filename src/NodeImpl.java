@@ -109,7 +109,7 @@ public class NodeImpl implements DKVSNode, Runnable{
                     if (commitIndex >= lastApplied) {
                         lastApplied = Math.min(lastApplied + 1, stateMachine.getLogSize());
                         stateMachine.apply(lastApplied);
-                        Log.debug("Log", String.format("Applied entry #%d on server %d", lastApplied, nodeId));
+                        Log.info("Log", String.format("Applied entry #%d on server %d", lastApplied, nodeId));
                     }
                     connection.sendTCP(new AppendEntriesResponse(currentTerm, true));
                 }
@@ -244,8 +244,8 @@ public class NodeImpl implements DKVSNode, Runnable{
                     nextIndex[i] = stateMachine.getLogSize() + 1;
                     matchIndex[i] = 0;
                 }
-                votesReceivedFuture.cancel(false);
                 sendRequests();
+                votesReceivedFuture.cancel(false);
             }
         };
 
@@ -317,7 +317,7 @@ public class NodeImpl implements DKVSNode, Runnable{
                     lastApplied = Math.min(lastApplied + 1, stateMachine.getLogSize());
                     stateMachine.apply(lastApplied);
                     commitIndex = lastApplied;
-                    Log.debug("Log", String.format("Applied entry #%d on server %d", lastApplied, nodeId));
+                    Log.info("Log", String.format("Applied entry #%d on server %d", lastApplied, nodeId));
                 }
             } catch (InterruptedException e) {
                 Log.error("Interruption", e.getMessage());
@@ -331,7 +331,15 @@ public class NodeImpl implements DKVSNode, Runnable{
     }
 
     void stop() {
+        self.close();
         self.stop();
+        for (int i = 1; i <= Constants.SERVER_COUNT; i++) {
+            if (i == nodeId) {
+                continue;
+            }
+            client[i].close();
+            client[i].stop();
+        }
         try {
             self.dispose();
         } catch (IOException e) {
